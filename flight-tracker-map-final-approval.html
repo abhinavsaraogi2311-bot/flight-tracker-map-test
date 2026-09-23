@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Flight Tracker — Map</title>
+<style>
+  :root{
+    --bg:#05080d;
+    --panel:#0b1119;
+    --panel2:#0e151f;
+    --border:#202b38;
+    --text:#eef4fb;
+    --muted:#8c99a8;
+    --blue:#73c8ff;
+    --blue2:#4baef1;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--bg);color:var(--text);
+    font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  .app{min-height:100vh;display:flex;flex-direction:column}
+  header{
+    height:64px;padding:0 28px;display:flex;align-items:center;
+    border-bottom:1px solid var(--border);background:#070b11;
+  }
+  .brand{font-weight:700;font-size:18px;white-space:nowrap}
+  nav{display:flex;gap:8px;margin-left:42px}
+  nav a{
+    color:#9ca9b8;text-decoration:none;padding:9px 14px;border-radius:7px;font-size:13px;
+  }
+  nav a.active{color:#fff;background:#17212d}
+  .header-actions{margin-left:auto;display:flex;gap:10px}
+  .header-actions button{
+    border:1px solid var(--border);background:#0d141d;color:#cbd5df;
+    border-radius:7px;padding:8px 12px;font-size:12px;
+  }
+  main{flex:1;display:flex;min-height:0}
+  .map-wrap{position:relative;flex:1;overflow:hidden;background:#071019}
+  svg{display:block;width:100%;height:calc(100vh - 64px);min-height:650px}
+  .ocean{fill:#071019}
+  .land{fill:#151d27;stroke:#263442;stroke-width:.55}
+  .graticule{fill:none;stroke:#14212d;stroke-width:.55;opacity:.65}
+  .route-shadow{fill:none;stroke:#173c56;stroke-linecap:round;opacity:.45}
+  .route{fill:none;stroke:var(--blue);stroke-linecap:round}
+  .airport-ring{fill:none;stroke:var(--blue);opacity:.8}
+  .airport-dot{fill:#9bdaff}
+  .airport-label{
+    fill:#f3f7fb;font-size:12px;font-weight:600;
+    paint-order:stroke;stroke:#071019;stroke-width:4px;stroke-linejoin:round;
+  }
+  .airport-name{
+    fill:#aebbc8;font-size:10px;
+    paint-order:stroke;stroke:#071019;stroke-width:3px;stroke-linejoin:round;
+  }
+  .controls{
+    position:absolute;left:18px;top:18px;display:flex;gap:8px;z-index:4
+  }
+  .control{
+    border:1px solid #24313e;background:rgba(9,15,22,.93);color:#cbd5df;
+    border-radius:7px;padding:8px 11px;font-size:12px;cursor:pointer;
+    backdrop-filter:blur(8px)
+  }
+  .control.active{color:#fff;border-color:#3a5b73;background:#132231}
+  .legend{
+    position:absolute;right:18px;bottom:18px;width:215px;
+    background:rgba(9,15,22,.93);border:1px solid var(--border);
+    border-radius:9px;padding:12px 14px;font-size:11px;color:#9aa8b7;
+    backdrop-filter:blur(8px)
+  }
+  .legend-title{font-size:12px;color:#dce5ee;font-weight:600;margin-bottom:9px}
+  .legend-line{height:3px;background:linear-gradient(90deg,#69c2f5,#2d82bd);border-radius:99px;margin-bottom:6px}
+  .legend-copy{display:flex;justify-content:space-between}
+  .status{
+    position:absolute;right:18px;top:18px;
+    font-size:11px;color:#8493a2;background:rgba(9,15,22,.82);
+    border:1px solid var(--border);padding:7px 10px;border-radius:7px
+  }
+  .mapbox-note{
+    position:absolute;left:18px;bottom:18px;font-size:10px;color:#687786;
+    background:rgba(7,11,16,.72);padding:5px 7px;border-radius:5px
+  }
+  @media(max-width:900px){
+    nav{margin-left:15px;gap:2px}
+    nav a{padding:8px 8px}
+    header{padding:0 14px}
+    .header-actions{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">✈ Flight Tracker</div>
+    <nav>
+      <a href="#">Add Flight</a>
+      <a href="#">Flight Log</a>
+      <a href="#">Stats</a>
+      <a class="active" href="#">Map</a>
+    </nav>
+    <div class="header-actions">
+      <button>↻ Sync</button>
+      <button>▣ Sheet</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="map-wrap">
+      <div class="controls">
+        <button class="control active" id="routesBtn">Routes</button>
+        <button class="control" id="heatBtn">Heat map</button>
+        <button class="control" id="resetBtn">Reset</button>
+      </div>
+      <div class="status">2D route map</div>
+      <svg id="map" aria-label="Flight route map"></svg>
+      <div class="legend">
+        <div class="legend-title">Route frequency</div>
+        <div class="legend-line"></div>
+        <div class="legend-copy"><span>Fewer flights</span><span>More flights</span></div>
+      </div>
+      <div class="mapbox-note">Map data: Natural Earth / airport coordinates</div>
+    </div>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3"></script>
+<script>
+/*
+  OPTIONAL MAP API KEY
+  --------------------
+  If you later switch the background to a keyed tile provider, put the key here.
+  This template intentionally does not require a key: the 2D base map is vector
+  data, so the page works immediately on GitHub Pages.
+
+  const MAP_API_KEY = "PASTE_YOUR_API_KEY_HERE";
+*/
+
+const airports = {
+  BLR:{code:"BLR", name:"Kempegowda International Airport", lat:13.1989, lon:77.7068},
+  DEL:{code:"DEL", name:"Indira Gandhi International Airport", lat:28.5562, lon:77.1000},
+  BOM:{code:"BOM", name:"Chhatrapati Shivaji Maharaj International Airport", lat:19.0896, lon:72.8656},
+  HKT:{code:"HKT", name:"Phuket International Airport", lat:8.1132, lon:98.3169},
+  SIN:{code:"SIN", name:"Singapore Changi Airport", lat:1.3644, lon:103.9915}
+};
+
+/*
+  Replace this sample data with your real flight-log aggregation.
+  n controls only the visual intensity of a route — it is NOT displayed on the map.
+*/
+const routes = [
+  {from:"BLR", to:"DEL", n:150},
+  {from:"BOM", to:"BLR", n:38},
+  {from:"HKT", to:"SIN", n:4},
+  {from:"BLR", to:"SIN", n:2},
+  {from:"SIN", to:"BOM", n:1},
+  {from:"SIN", to:"DEL", n:1}
+];
+
+const svg = d3.select("#map");
+let width, height, projection, path, root, routeLayer, airportLayer;
+let showRoutes = true, showHeat = false;
+
+function resize(){
+  const box = document.querySelector(".map-wrap").getBoundingClientRect();
+  width = box.width; height = box.height;
+  svg.attr("viewBox", `0 0 ${width} ${height}`);
+  projection = d3.geoNaturalEarth1()
+    .fitExtent([[30,35],[width-30,height-30]], {type:"Sphere"});
+  path = d3.geoPath(projection);
+  render();
+}
+
+function routeFeature(a,b){
+  const start=[a.lon,a.lat], end=[b.lon,b.lat];
+  const interp=d3.geoInterpolate(start,end);
+  const points=d3.range(0,1.001,1/80).map(t=>interp(t));
+
+  // A gentle great-circle arc. The geographic interpolation creates the curve;
+  // the extra sampling keeps it smooth without making the line look "jazzy".
+  return {type:"LineString",coordinates:points};
+}
+
+function routeWidth(n){
+  const max=Math.max(1,d3.max(routes,d=>d.n));
+  return 1.15 + 2.1 * Math.sqrt(n/max);
+}
+
+function routeOpacity(n){
+  const max=Math.max(1,d3.max(routes,d=>d.n));
+  return 0.28 + 0.55 * Math.sqrt(n/max);
+}
+
+function render(){
+  if(!projection) return;
+  svg.selectAll("*").remove();
+
+  root=svg.append("g");
+  root.append("path").datum({type:"Sphere"}).attr("class","ocean").attr("d",path);
+
+  const graticule=d3.geoGraticule().step([30,20]);
+  root.append("path").datum(graticule()).attr("class","graticule").attr("d",path);
+
+  fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
+    .then(r=>r.json())
+    .then(world=>{
+      root.selectAll(".land")
+        .data(topojson.feature(world,world.objects.countries).features)
+        .join("path")
+        .attr("class","land")
+        .attr("d",path);
+
+      drawRoutes();
+      drawAirports();
+    })
+    .catch(()=>{
+      drawRoutes();
+      drawAirports();
+    });
+}
+
+function drawRoutes(){
+  if(!showRoutes) return;
+  routeLayer=root.append("g").attr("class","routes");
+
+  const data=routes.map(r=>{
+    const a=airports[r.from], b=airports[r.to];
+    return {...r, feature:routeFeature(a,b)};
+  });
+
+  routeLayer.selectAll(".route-shadow")
+    .data(data).join("path")
+    .attr("class","route-shadow")
+    .attr("d",d=>path(d.feature))
+    .attr("stroke-width",d=>routeWidth(d.n)+2.4);
+
+  routeLayer.selectAll(".route")
+    .data(data).join("path")
+    .attr("class","route")
+    .attr("d",d=>path(d.feature))
+    .attr("stroke-width",d=>routeWidth(d.n))
+    .attr("stroke-opacity",d=>routeOpacity(d.n));
+}
+
+function drawAirports(){
+  airportLayer=root.append("g").attr("class","airports");
+
+  Object.values(airports).forEach(a=>{
+    const [x,y]=projection([a.lon,a.lat]);
+    const g=airportLayer.append("g").attr("transform",`translate(${x},${y})`);
+
+    // Simple radial circle — deliberately understated.
+    g.append("circle").attr("class","airport-ring").attr("r",7);
+    g.append("circle").attr("class","airport-dot").attr("r",2.7);
+
+    // Only the 3-letter IATA code above the radial circle.
+    g.append("text")
+      .attr("class","airport-label")
+      .attr("text-anchor","middle")
+      .attr("y",-13)
+      .text(a.code);
+  });
+}
+
+document.getElementById("routesBtn").onclick=()=>{
+  showRoutes=true; showHeat=false;
+  document.getElementById("routesBtn").classList.add("active");
+  document.getElementById("heatBtn").classList.remove("active");
+  render();
+};
+
+document.getElementById("heatBtn").onclick=()=>{
+  showHeat=!showHeat;
+  document.getElementById("heatBtn").classList.toggle("active",showHeat);
+  // Kept intentionally simple: the heat layer is a subtle radial intensity layer,
+  // while the route view remains the default.
+  if(showHeat) addHeat();
+  else render();
+};
+
+function addHeat(){
+  if(!root) return;
+  d3.select("#map").selectAll(".heat-layer").remove();
+  const defs=svg.select("defs").empty()?svg.append("defs"):svg.select("defs");
+  defs.select("#heatGrad").remove();
+  const grad=defs.append("radialGradient").attr("id","heatGrad");
+  grad.append("stop").attr("offset","0%").attr("stop-opacity",.25);
+  grad.append("stop").attr("offset","100%").attr("stop-opacity",0);
+
+  const heat=root.insert("g",":first-child").attr("class","heat-layer");
+  routes.forEach(r=>{
+    const a=airports[r.from], b=airports[r.to];
+    [a,b].forEach(p=>{
+      const [x,y]=projection([p.lon,p.lat]);
+      heat.append("circle").attr("cx",x).attr("cy",y)
+        .attr("r",70).attr("fill","url(#heatGrad)");
+    });
+  });
+}
+
+document.getElementById("resetBtn").onclick=resize;
+window.addEventListener("resize",resize);
+resize();
+</script>
+</body>
+</html>
